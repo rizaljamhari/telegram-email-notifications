@@ -1,38 +1,44 @@
+import os
 import imaplib
 import re
 import email.header
 import requests
+import json
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class Mailbox:
   def __init__(self, mail, mailbox, password, folder = 'Inbox'):
     if not mail or not mailbox or not password:
-      raise Exception('Each parameter must not be empty') 
+      raise Exception('Each parameter must not be empty')
     self.mail = mail
     self.mailbox = mailbox
     self.__password = password
     self.folder = folder
     self.__login()
-    
+
   def __login(self):
     try:
       self.__imap = imaplib.IMAP4_SSL(self.mail)
       self.__imap.login(self.mailbox, self.__password)
       uids = self.__getUnseenUids()
-      self.__lastUid = max(uids) if len(uids) > 0 else -1
     except:
       raise Exception('Access denied. Check the data or the server permissions.')
-    
-  def getUnseenMails(self, allUnread = False):
-    uids = self.__getUnseenUids()
 
-    if not allUnread:
-      uids = [int(uid) for uid in uids if int(uid) > self.__lastUid]
+  def getUnseenMails(self):
+    uids = self.__getUnseenUids()
 
     if len(uids) == 0:
       return []
-    
+
     mails = []
+
     for uid in uids:
+      print('Checking ' + str(uid) + ' Notification sent?: ' + str(self.__isNotificationSent(uid)))
+      if self.__isNotificationSent(uid):
+        continue
+
       mail = {}
       try:
         tmp, text = self.__imap.uid('fetch', str(uid).encode('utf-8'), '(FLAGS RFC822.HEADER)')
@@ -44,15 +50,16 @@ class Mailbox:
         mail['sender'] = self.__extractMailData(text, '\r\nFrom: (.*?)\r\n[\w]')
         mail['subject'] = self.__extractMailData(text, '\r\nSubject: (.*?)\r\n[\w]')
         mails.append(mail)
-    
-    if len(uids) > 0:
-      self.__lastUid = max(uids)
-    
+
+        # write to file to avoid sending the same notification twice
+        with open('notificationSent.txt', 'a') as notificationSentFile:
+          notificationSentFile.write(str(uid) + '\n')
+
     return mails
-    
+
   def __extractMailData(self, source, regex):
     result = ''
-    try: 
+    try:
       data = re.search(regex, source, re.DOTALL)
       data = data.group(1)
       data = email.header.decode_header(data)
@@ -77,20 +84,38 @@ class Mailbox:
     else:
       return uids
 
+  def __isNotificationSent(self, uid):
+    with open('notificationSent.txt') as notificationSentFile:
+      if str(uid) in notificationSentFile.read():
+        return True
+
+    return False
+
 class TgSender:
-  
+
   __sendMessageUrl = 'https://api.telegram.org/bot<token>/sendMessage'
 
   def __init__(self, token, chatId):
     if not token or not chatId:
-      raise Exception('Each parameter must not be empty') 
+      raise Exception('Each parameter must not be empty')
     self.__tgApiToken = token
     self.__sendMessageUrl = self.__sendMessageUrl.replace('<token>', token)
     self.__chatId = chatId
-    
+
   def send(self, text):
-    data = {'chat_id': self.__chatId, 'text': text}
+    print('text: ' + text)
+    data = {
+      'chat_id': self.__chatId,
+      'text': text,
+      'parse_mode': 'MarkdownV2',
+      'reply_markup': json.dumps({
+        "inline_keyboard": [[
+          { "text": "Open Webmail", "url": os.getenv('MAIL_CLIENT_URL') }
+        ]]
+      })
+    }
+
     try:
-      requests.post(self.__sendMessageUrl, data=data)
+      r = requests.post(self.__sendMessageUrl, data=data)
     except:
       print('Failed to send notification. Check the availability of Telegram servers (for example, Telegram website) from place where the script is running')

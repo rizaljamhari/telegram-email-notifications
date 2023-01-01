@@ -1,25 +1,31 @@
+import os
 import mailbot
 import time
+import helpers
+from dotenv import load_dotenv
 
-chatId       = '-123456789'
-tgApiToken   = '123456789:abc'
-mailServer   = 'mail.example.com'
-mailAddress  = 'user@example.com'
-mailPassword = 'password'
-mailFolder   = 'Inbox'
+load_dotenv()
+
+chatId       = os.getenv('TG_CHAT_ID')
+tgApiToken   = os.getenv('TG_API_TOKEN')
+mailServer   = os.getenv('MAIL_SERVER')
+mailAddress  = os.getenv('MAIL_ADDRESS')
+mailPassword = os.getenv('MAIL_PASSWORD')
+mailFolder   = os.getenv('MAIL_FOLDER')
 
 mailbox = mailbot.Mailbox(mailServer, mailAddress, mailPassword, mailFolder)
 sender  = mailbot.TgSender(tgApiToken, chatId)
 
 print('Start checking..')
-while(1):
-  emails = mailbox.getUnseenMails(False)
+emails = mailbox.getUnseenMails()
 
-  for email in emails:
-    print(email)
-    data = str(email['sender']) + '\n\n' + str(email['subject'])
-    sender.send(data)
+print('Found ' + str(len(emails)) + ' new emails')
+for email in emails:
+  print(email)
+  data = '*_New email received\!_*\n'
+  data = data + '*To:* ' + helpers.escape_markdown(mailAddress, 2) + '\n'
+  data = data + '*From:* ' +  helpers.escape_markdown(str(email['sender']), 2) + '\n'
+  data = data + '*Subject:* ' +  helpers.escape_markdown(str(email['subject']), 2)
 
-  time.sleep(30)
-    
-    
+  print('data: ' + data)
+  sender.send(data)
